@@ -9,3 +9,12 @@ core/build-win/
 *.exp
 *.so
 *.dylib
+build/
+build_tmp/
+*.egg-info/
+dist/
+.env
+Thumbs.db
+.DS_Store
+.vscode/
+.idea/
