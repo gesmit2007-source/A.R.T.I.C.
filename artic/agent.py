@@ -2,10 +2,12 @@
 from __future__ import annotations
 import json
 import re
+from pathlib import Path
 
 from .llm import Engine
 from .vault import Vault
 from .load_core import load_core
+from .tools import Repo, ToolError
 
 LAWS = """You are A.R.T.I.C., a long-term cognitive partner.
 LAW 1: You never forget. Your memory is an Obsidian vault; relevant notes are provided below.
@@ -22,6 +24,25 @@ DREAM = """You are the dreaming process of A.R.T.I.C. Below are clusters of rela
 Find non-obvious cross-domain connections, open questions, and contradictions.
 Return ONLY JSON: {"title": str, "insight": str (markdown, cite notes as [[Title]]), "tags": [..], "links": [..]}"""
 
+ACT = """You are extending your own codebase. Work one step at a time.
+
+Reply with ONE tool call in this exact form when you need information or want to change a file:
+```tool
+{"tool": "read_file", "path": "artic/agent.py"}
+```
+
+Tools:
+- read_file {"path": str}
+- list_files {"dir": str}
+- propose_write {"path": str, "content": str}  # shows a diff, asks the user, then runs tests
+- run_tests {}
+
+Rules: read a file before proposing changes to it. A write only counts when the tool result says it succeeded.
+Never claim a change the tool rejected. When you are done, reply with a short summary and no tool block.
+
+Repository files:
+"""
+
 
 def _json(text: str) -> dict | None:
     m = re.search(r"\{.*\}", text, re.S)
@@ -33,9 +54,21 @@ def _json(text: str) -> dict | None:
         return None
 
 
+def _tool_call(text: str) -> dict | None:
+    m = re.search(r"```tool\s*(\{.*?\})\s*```", text, re.S)
+    if not m:
+        return None
+    try:
+        data = json.loads(m.group(1))
+    except json.JSONDecodeError:
+        return {"tool": "_invalid"}
+    return data if isinstance(data, dict) else {"tool": "_invalid"}
+
+
 class Artic:
-    def __init__(self, vault: Vault, engine: Engine, index, k: int = 5):
+    def __init__(self, vault: Vault, engine: Engine, index, k: int = 5, tools: Repo | None = None):
         self.vault, self.engine, self.index, self.k = vault, engine, index, k
+        self.tools = tools or Repo(Path(__file__).resolve().parents[1])
         self.history: list[dict] = []
         vault.init()
         index.rebuild()
@@ -101,3 +134,67 @@ class Artic:
         self.vault.write_note(title, data.get("insight", ""), data.get("tags", ["dream"]), links, "Reflections")
         self.index.rebuild()
         return title
+
+    def _tool_system(self, recalled: list[dict]) -> str:
+        identity = "\n\n".join(load_core())
+        base = (
+            "You are A.R.T.I.C., a long-term cognitive partner working on your own source code.\n"
+            "Your memory is an Obsidian vault; relevant notes are provided below.\n"
+            "You live by these founding principles:\n\n" + identity
+        )
+        if recalled:
+            mem = "\n\n".join(f"### [[{r['title']}]]\n{r['excerpt'][:500]}" for r in recalled)
+            base += f"\n\nRECALLED MEMORIES:\n{mem}"
+        files = "\n".join(f"- {p}" for p in self.tools.list_files())
+        return f"{base}\n\n{ACT}{files}"
+
+    @staticmethod
+    def _confirm(change) -> bool:
+        print("\n" + change.diff())
+        try:
+            return input("Apply this change? [y/N] ").strip().lower() in {"y", "yes"}
+        except EOFError:
+            return False
+
+    def _run_tool(self, call: dict, approve) -> str:
+        name = call.get("tool")
+        if name == "_invalid":
+            return "ERROR: invalid tool JSON. Reply with one JSON object in a ```tool block."
+        try:
+            if name == "read_file":
+                return self.tools.read(str(call["path"]))
+            if name == "list_files":
+                return "\n".join(self.tools.list_files(str(call.get("dir", "."))))
+            if name == "run_tests":
+                r = self.tools.run_tests()
+                return ("PASS\n" if r.ok else "FAIL\n") + r.output
+            if name == "propose_write":
+                change = self.tools.propose(str(call["path"]), str(call["content"]))
+                return change.apply(approve)
+        except ToolError as e:
+            return f"ERROR: {e}"
+        except KeyError as e:
+            return f"ERROR: missing argument {e}"
+        return f"ERROR: unknown tool {name}"
+
+    def act(self, goal: str, approve=None, max_steps: int = 8) -> str:
+        """Let the model read, test, and (with approval) change the codebase."""
+        approve = approve or self._confirm
+        recalled = self.recall(goal)
+        system = self._tool_system(recalled)
+        messages = [{"role": "user", "content": f"GOAL: {goal}"}]
+        self.vault.journal(f"**Act goal:** {goal}")
+        for _ in range(max_steps):
+            reply = self.engine.complete(system, messages)
+            messages.append({"role": "assistant", "content": reply})
+            call = _tool_call(reply)
+            if call is None:
+                self.vault.journal(f"**Act answer:** {reply}")
+                note = self.remember(goal, reply, recalled)
+                return reply + f"\n\n[remembered as [[{note}]]]"
+            label = call.get("tool", "?")
+            result = self._run_tool(call, approve)
+            self.vault.journal(f"**Tool:** {label}\n\n{result[:1200]}")
+            messages.append({"role": "user", "content": f"TOOL RESULT ({label}):\n{result}"})
+        self.vault.journal("**Act stopped:** step limit reached")
+        return "Stopped: step limit reached without a final answer."
