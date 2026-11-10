@@ -1,0 +1,10 @@
+[project]
+name = "artic"
+version = "0.1.0"
+description = "A.R.T.I.C. - non-ephemeral AI with an Obsidian vault as permanent memory"
+requires-python = ">=3.10"
+dependencies = []
+[project.optional-dependencies]
+dev = ["pytest"]
+[project.scripts]
+artic = "artic.__main__:main"
