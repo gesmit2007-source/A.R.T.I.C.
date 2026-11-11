@@ -19,11 +19,14 @@ def main():
     vault = Vault(a.vault)
     vault.init()
     index = open_index(str(vault.root))
-    agent = Artic(vault, make_engine(a.engine), index)
 
     if a.cmd == "init":
         print(f"Vault ready at {vault.root} (index backend: {index.backend})")
-    elif a.cmd == "stats":
+        return
+
+    agent = Artic(vault, make_engine(a.engine), index)
+
+    if a.cmd == "stats":
         print(index.stats(), "backend:", index.backend)
     elif a.cmd == "search":
         for h in index.search(" ".join(a.query), 8):

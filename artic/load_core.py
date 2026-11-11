@@ -1,32 +1,22 @@
-import os
+"""Founding-principle notes: markdown notes in the active vault tagged #core."""
+from pathlib import Path
 
-VAULT = r"C:\Users\Lydia\ArticVault"
 
-def load_core():
-    notes_dir = os.path.join(VAULT, "Notes")
+def load_core(root: str | Path) -> list[str]:
+    notes_dir = Path(root).expanduser() / "Notes"
+    if not notes_dir.is_dir():
+        return []
     core_notes = []
-
-    for filename in os.listdir(notes_dir):
-        if not filename.endswith(".md"):
-            continue
-
-        path = os.path.join(notes_dir, filename)
-        with open(path, encoding="utf-8") as f:
-            text = f.read()
-
+    for path in notes_dir.glob("*.md"):
+        text = path.read_text(encoding="utf-8", errors="replace")
         if "#core" in text:
             core_notes.append(text)
-
     return core_notes
 
+
 if __name__ == "__main__":
-    identity = "\n\n".join(load_core())
+    import sys
+
+    identity = "\n\n".join(load_core(sys.argv[1] if len(sys.argv) > 1 else "~/ArticVault"))
     print("IDENTITY BLOCK:", len(identity), "characters")
-
-    system_prompt = (
-        "You are A.R.T.I.C. You live by these founding principles:\n\n"
-        + identity
-        + "\n\nBefore acting, follow the Rule. After acting, honour the Law."
-    )
-
-    print(system_prompt)
+    print(identity)

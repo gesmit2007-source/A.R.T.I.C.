@@ -2,6 +2,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import artic.__main__ as cli
 from artic.__main__ import main
 from artic.vault import Vault
 
@@ -34,6 +35,32 @@ def test_init_creates_vault(capsys, monkeypatch, tmp_path):
     for folder in Vault.FOLDERS:
         assert (tmp_path / folder).is_dir()
     assert (tmp_path / "Home.md").exists()
+
+
+def test_init_does_not_build_the_index(capsys, monkeypatch, tmp_path):
+    calls = []
+    real_open_index = cli.open_index
+
+    class CountingIndex:
+        def __init__(self, inner):
+            self._inner = inner
+            self.backend = inner.backend
+
+        def rebuild(self):
+            calls.append(True)
+            return self._inner.rebuild()
+
+        def __getattr__(self, name):
+            return getattr(self._inner, name)
+
+    monkeypatch.setattr(cli, "open_index",
+                        lambda root: CountingIndex(real_open_index(root)))
+
+    out = run_cli(capsys, monkeypatch, tmp_path, "init")
+
+    assert "Vault ready" in out
+    assert "backend:" in out
+    assert calls == []
 
 
 def test_stats_counts_only_notes(capsys, monkeypatch, tmp_path):

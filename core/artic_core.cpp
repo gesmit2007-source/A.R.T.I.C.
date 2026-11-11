@@ -35,6 +35,7 @@ struct Index {
     std::vector<Doc> docs;
     std::unordered_map<std::string, int> df;
     std::unordered_map<std::string, int> by_title;
+    double total_len = 0;
     double avglen = 1;
 };
 
@@ -98,6 +99,20 @@ void parse(const std::string& text, Doc& d) {
     }
 }
 
+bool load_doc(const fs::path& p, Doc& d) {
+    std::ifstream f(p, std::ios::binary);
+    if (!f) return false;
+    std::stringstream ss; ss << f.rdbuf();
+    std::string text = ss.str();
+    d.path = p.string();
+    d.title = p.stem().string();
+    d.excerpt = text.substr(0, 700);
+    parse(text, d);
+    for (auto& t : tokenize(text)) { d.tf[t]++; d.len++; }
+    for (auto& t : tokenize(d.title)) { d.tf[t] += 3; d.len += 3; }
+    return true;
+}
+
 }  // namespace
 
 extern "C" {
@@ -113,6 +128,7 @@ ARTIC_API void artic_index_free(void* h) { delete static_cast<Index*>(h); }
 ARTIC_API int artic_index_rebuild(void* h) {
     auto* ix = static_cast<Index*>(h);
     ix->docs.clear(); ix->df.clear(); ix->by_title.clear();
+    ix->total_len = 0;
     std::error_code ec;
     for (fs::recursive_directory_iterator it(ix->root, fs::directory_options::skip_permission_denied, ec), end;
          it != end; it.increment(ec)) {
@@ -127,23 +143,53 @@ ARTIC_API int artic_index_rebuild(void* h) {
         }
         if (!it->is_regular_file(ec) || p.extension() != ".md") continue;
         if (p.parent_path() == fs::path(ix->root)) continue;
-        std::ifstream f(p, std::ios::binary);
-        std::stringstream ss; ss << f.rdbuf();
-        std::string text = ss.str();
         Doc d;
-        d.path = p.string();
-        d.title = p.stem().string();
-        d.excerpt = text.substr(0, 700);
-        parse(text, d);
-        for (auto& t : tokenize(text)) { d.tf[t]++; d.len++; }
-        for (auto& t : tokenize(d.title)) { d.tf[t] += 3; d.len += 3; }
+        if (!load_doc(p, d)) continue;
         for (auto& kv : d.tf) ix->df[kv.first]++;
         ix->by_title[lower(d.title)] = (int)ix->docs.size();
+        ix->total_len += d.len;
         ix->docs.push_back(std::move(d));
     }
-    double total = 0;
-    for (auto& d : ix->docs) total += d.len;
-    ix->avglen = ix->docs.empty() ? 1 : total / ix->docs.size();
+    ix->avglen = ix->docs.empty() ? 1 : ix->total_len / ix->docs.size();
+    return (int)ix->docs.size();
+}
+
+ARTIC_API int artic_index_add(void* h, const char* path) {
+    auto* ix = static_cast<Index*>(h);
+    fs::path p(path);
+    std::error_code ec;
+    auto rel = fs::relative(p, ix->root, ec);
+    if (!ec) {
+        auto first = rel.begin();
+        bool scoped = rel.extension() == ".md" && first != rel.end() &&
+                      (*first == "Notes" || *first == "Reflections");
+        if (!scoped) return (int)ix->docs.size();
+    }
+    Doc d;
+    if (!load_doc(p, d)) return (int)ix->docs.size();
+    for (size_t i = 0; i < ix->docs.size(); ++i) {
+        auto& old = ix->docs[i];
+        if (old.path != d.path) continue;
+        for (auto& kv : old.tf) {
+            auto f = ix->df.find(kv.first);
+            if (f != ix->df.end() && --f->second == 0) ix->df.erase(f);
+        }
+        ix->total_len -= old.len;
+        if (lower(old.title) != lower(d.title)) {
+            auto t = ix->by_title.find(lower(old.title));
+            if (t != ix->by_title.end() && t->second == (int)i) ix->by_title.erase(t);
+        }
+        ix->total_len += d.len;
+        ix->by_title[lower(d.title)] = (int)i;
+        ix->docs[i] = std::move(d);
+        ix->avglen = ix->docs.empty() ? 1 : ix->total_len / ix->docs.size();
+        return (int)ix->docs.size();
+    }
+    for (auto& kv : d.tf) ix->df[kv.first]++;
+    ix->by_title[lower(d.title)] = (int)ix->docs.size();
+    ix->total_len += d.len;
+    ix->docs.push_back(std::move(d));
+    ix->avglen = ix->docs.empty() ? 1 : ix->total_len / ix->docs.size();
     return (int)ix->docs.size();
 }
 

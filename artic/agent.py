@@ -37,6 +37,7 @@ class Artic:
     def __init__(self, vault: Vault, engine: Engine, index, k: int = 5):
         self.vault, self.engine, self.index, self.k = vault, engine, index, k
         self.history: list[dict] = []
+        self._identity: str | None = None
         vault.init()
         index.rebuild()
 
@@ -44,7 +45,9 @@ class Artic:
         return self.index.search(query, self.k)
 
     def _system(self, recalled: list[dict]) -> str:
-        identity = "\n\n".join(load_core())
+        if self._identity is None:
+            self._identity = "\n\n".join(load_core(self.vault.root))
+        identity = self._identity
         base = (
             "You are A.R.T.I.C., a long-term cognitive partner.\n"
             "Your memory is an Obsidian vault; relevant notes are provided below.\n"
@@ -74,11 +77,11 @@ class Artic:
         title = data.get("title") or user_text[:50]
         tags = [t for t in data.get("tags", []) if isinstance(t, str)] or ["unsorted"]
         links = [l for l in data.get("links", []) if isinstance(l, str)]
-        self.vault.write_note(title, data.get("summary", ""), tags, links)
+        note = self.vault.write_note(title, data.get("summary", ""), tags, links)
         for t in tags:
             self.vault.hub(t, title)
         self.vault.journal(f"**You:** {user_text}\n\n**A.R.T.I.C.:** {reply}\n\nDistilled into [[{title}]]")
-        self.index.rebuild()
+        self.index.add(str(note))
         return title
 
     def dream(self, n: int = 5) -> str | None:
@@ -98,6 +101,6 @@ class Artic:
         n_ = self.vault.now()
         title = f"Dream {n_:%Y-%m-%d %H%M} - {data.get('title', 'Synthesis')}"
         links = [p.stem for p in recent] + [l for l in data.get("links", []) if isinstance(l, str)]
-        self.vault.write_note(title, data.get("insight", ""), data.get("tags", ["dream"]), links, "Reflections")
-        self.index.rebuild()
+        note = self.vault.write_note(title, data.get("insight", ""), data.get("tags", ["dream"]), links, "Reflections")
+        self.index.add(str(note))
         return title

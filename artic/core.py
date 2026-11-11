@@ -56,6 +56,16 @@ class NativeIndex:
     def rebuild(self) -> int:
         return self.L.artic_index_rebuild(self.h)
 
+    def add(self, path: str) -> int:
+        if not _in_note_folder(self.root, path):
+            return self.stats()["notes"]
+        fn = getattr(self.L, "artic_index_add", None)
+        if fn is None:
+            return self.rebuild()
+        fn.argtypes = [ctypes.c_void_p, ctypes.c_char_p]
+        fn.restype = ctypes.c_int
+        return fn(self.h, str(path).encode())
+
     def search(self, q: str, k: int = 5) -> list[dict]:
         hits = json.loads(self._s(self.L.artic_search(self.h, q.encode(), k * 4)))
         return [h for h in hits if _in_note_folder(self.root, h.get("path", ""))][:k]
@@ -84,6 +94,13 @@ class PyIndex:
     def _tok(s):
         return set(re.findall(r"\w{2,}", s.lower()))
 
+    @staticmethod
+    def _load(path: Path) -> dict:
+        t = path.read_text(encoding="utf-8", errors="replace")
+        links = [l.split("|")[0].split("#")[0] for l in re.findall(r"\[\[([^\]]+)\]\]", t)]
+        return dict(title=path.stem, path=str(path), text=t, links=links,
+                    toks=PyIndex._tok(t) | PyIndex._tok(path.stem))
+
     def rebuild(self) -> int:
         self.docs = []
         for folder in NOTE_FOLDERS:
@@ -91,10 +108,20 @@ class PyIndex:
             if not base.exists():
                 continue
             for p in base.rglob("*.md"):
-                t = p.read_text(encoding="utf-8", errors="replace")
-                links = [l.split("|")[0].split("#")[0] for l in re.findall(r"\[\[([^\]]+)\]\]", t)]
-                self.docs.append(dict(title=p.stem, path=str(p), text=t, links=links,
-                                      toks=self._tok(t) | self._tok(p.stem)))
+                self.docs.append(self._load(p))
+        return len(self.docs)
+
+    def add(self, path: str) -> int:
+        p = Path(path)
+        if not _in_note_folder(self.root, str(p)):
+            return len(self.docs)
+        doc = self._load(p)
+        for i, d in enumerate(self.docs):
+            if Path(d["path"]) == p:
+                self.docs[i] = doc
+                break
+        else:
+            self.docs.append(doc)
         return len(self.docs)
 
     def search(self, q, k=5):
