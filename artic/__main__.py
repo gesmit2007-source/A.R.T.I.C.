@@ -10,7 +10,7 @@ from .vault import Vault
 
 def main():
     ap = argparse.ArgumentParser(prog="artic", description="A.R.T.I.C. - never forgets.")
-    ap.add_argument("cmd", choices=["init", "chat", "dream", "search", "stats", "act"])
+    ap.add_argument("cmd", choices=["init", "chat", "dream", "search", "stats"])
     ap.add_argument("query", nargs="*")
     ap.add_argument("--vault", default=os.environ.get("ARTIC_VAULT", "~/ArticVault"))
     ap.add_argument("--engine", default=None, help="anthropic | openai | echo")
@@ -30,12 +30,6 @@ def main():
             print(f"{h['score']:.2f}  [[{h['title']}]]")
     elif a.cmd == "dream":
         print("Wrote:", agent.dream() or "nothing to consolidate yet")
-    elif a.cmd == "act":
-        goal = " ".join(a.query).strip()
-        if not goal:
-            print('usage: artic act "what to build"')
-        else:
-            print(agent.act(goal))
     else:
         print(f"A.R.T.I.C. online (engine={agent.engine.name}, memory={index.backend}). Ctrl-Z then Enter to exit.")
         try:
