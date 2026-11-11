@@ -5,6 +5,7 @@ import sys
 from .agent import Artic
 from .core import open_index
 from .llm import make_engine
+from .ui import splash
 from .vault import Vault
 
 
@@ -34,7 +35,8 @@ def main():
     elif a.cmd == "dream":
         print("Wrote:", agent.dream() or "nothing to consolidate yet")
     else:
-        print(f"A.R.T.I.C. online (engine={agent.engine.name}, memory={index.backend}). Ctrl-Z then Enter to exit.")
+        print(splash(vault, agent.engine, index))
+        print("Ctrl-Z then Enter to exit.")
         try:
             while True:
                 print("\n" + agent.chat(input("you> ")))

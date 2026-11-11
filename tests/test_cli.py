@@ -89,7 +89,8 @@ def test_chat_remembers_and_exits_on_eof(capsys, monkeypatch, tmp_path):
 
     out = run_cli(capsys, monkeypatch, tmp_path, "chat", "--engine", "echo")
 
-    assert "engine=echo" in out
+    assert out.count("A . R . T . I . C .") == 1
+    assert "echo" in out
     assert "(echo engine) I heard: hello there" in out
     assert "[remembered as [[" in out
     assert "Everything is saved. Nothing is forgotten." in out
